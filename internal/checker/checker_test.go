@@ -54,7 +54,9 @@ func TestParseIPAPIISResponse(t *testing.T) {
 	body := []byte(`{
 		"ip":"23.236.48.55",
 		"is_mobile":false,
+		"is_satellite":false,
 		"is_datacenter":true,
+		"is_crawler":"GoogleBot",
 		"is_tor":false,
 		"is_proxy":false,
 		"is_vpn":false,
@@ -73,7 +75,58 @@ func TestParseIPAPIISResponse(t *testing.T) {
 	if !info.IsDatacenter {
 		t.Fatal("期望识别 datacenter 标记")
 	}
+	if !info.IsCrawler {
+		t.Fatal("期望识别 crawler 标记")
+	}
 	if info.CountryCode != "US" {
 		t.Fatalf("期望国家代码为 US，实际为 %s", info.CountryCode)
+	}
+}
+
+func TestValidateUSResidentialLikeIPSuccess(t *testing.T) {
+	info := IPInfo{
+		IP:          "1.2.3.4",
+		CountryCode: "US",
+		CountryName: "United States",
+		ASN:         7922,
+		ASNOrg:      "Comcast Cable Communications, LLC",
+		ASNType:     "isp",
+		CompanyName: "Comcast Cable Communications, LLC",
+		CompanyType: "isp",
+	}
+
+	if err := ValidateUSResidentialLikeIP(info); err != nil {
+		t.Fatalf("期望校验成功，实际报错: %v", err)
+	}
+}
+
+func TestValidateUSResidentialLikeIPRejectNonISP(t *testing.T) {
+	info := IPInfo{
+		IP:          "1.2.3.4",
+		CountryCode: "US",
+		CountryName: "United States",
+		ASN:         396982,
+		ASNOrg:      "Google LLC",
+		ASNType:     "hosting",
+	}
+
+	if err := ValidateUSResidentialLikeIP(info); err == nil {
+		t.Fatal("期望非 isp ASN 被拒绝")
+	}
+}
+
+func TestValidateUSResidentialLikeIPRejectMobile(t *testing.T) {
+	info := IPInfo{
+		IP:          "1.2.3.4",
+		CountryCode: "US",
+		CountryName: "United States",
+		ASN:         1234,
+		ASNOrg:      "Example ISP",
+		ASNType:     "isp",
+		IsMobile:    true,
+	}
+
+	if err := ValidateUSResidentialLikeIP(info); err == nil {
+		t.Fatal("期望移动网络被拒绝")
 	}
 }

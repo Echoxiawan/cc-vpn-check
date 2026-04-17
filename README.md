@@ -7,8 +7,10 @@
 当前已实现的检查规则：
 
 - 检查出口 IP 是否为美国 IP
-- 检查 ASN Type 是否为 `hosting`
-- 如果 `asn.type == hosting`，则拒绝启动
+- 要求 `asn.type` 必须为 `isp`
+- 如果 `company.type` 有值，也必须为 `isp`
+- 排除 `datacenter`、`vpn`、`proxy`、`tor`
+- 排除 `mobile`、`satellite`、`crawler`
 - 启动前打印 IP 情报接口的原始 JSON，便于继续扩展规则
 
 目前程序优先使用 `ipapi.is` 获取较完整的网络属性信息，并在失败时回退到其他 IP 信息源。
@@ -18,7 +20,8 @@
 适用于这类需求：
 
 - 启动某个命令前，必须确认出口 IP 在美国
-- 希望过滤掉明显的机房、云主机、托管网络出口
+- 希望只允许更接近家庭宽带特征的 ISP 网络
+- 希望过滤掉明显的机房、云主机、托管、移动、卫星、爬虫网络出口
 - 希望后续继续增加住宅宽带、移动网络、VPN、代理等校验维度
 
 ## 工作原理
@@ -34,7 +37,15 @@
 当前 IP 校验规则：
 
 - `country_code` 必须为 `US`
-- `asn.type` 不能为 `hosting`
+- `asn.type` 必须为 `isp`
+- `company.type` 如果存在，则必须为 `isp`
+- `is_datacenter` 必须为 `false`
+- `is_vpn` 必须为 `false`
+- `is_proxy` 必须为 `false`
+- `is_tor` 必须为 `false`
+- `is_mobile` 必须为 `false`
+- `is_satellite` 必须为 `false`
+- `is_crawler` 必须为 `false`
 
 ## 项目结构
 
@@ -75,7 +86,7 @@ go run . python app.py
 go run . node server.js
 ```
 
-程序会先打印 IP 信息源、原始响应、AS 信息和网络标记，然后决定是否放行启动目标程序。
+程序会先打印 IP 信息源、原始响应、AS 信息和网络标记，然后按“美国 ISP、非机房、非代理/VPN、非移动/卫星/爬虫”的规则决定是否放行启动目标程序。
 
 ## 编译教程
 
@@ -424,6 +435,12 @@ AS 信息: asn=12345 org=Example Org type=isp
 检查通过: 出口 IP=1.2.3.4，国家=US(United States)
 ```
 
+当前实际输出中的网络标记包含：
+
+```text
+网络标记: mobile=false satellite=false crawler=false datacenter=false tor=false proxy=false vpn=false
+```
+
 如果校验失败，可能输出：
 
 ```text
@@ -433,7 +450,19 @@ AS 信息: asn=12345 org=Example Org type=isp
 或：
 
 ```text
-当前出口 IP 的 ASN 类型为 hosting，判定为非住宅宽带倾向网络，已阻止启动: asn=12345 org=Example Hosting
+当前出口 IP 的 ASN 类型不是 isp，已阻止启动: asn=12345 org=Example Hosting asn_type=hosting
+```
+
+或：
+
+```text
+当前出口 IP 的公司类型不是 isp，已阻止启动: company=Example Corp company_type=business
+```
+
+或：
+
+```text
+当前出口 IP 被识别为移动网络，不符合家庭宽带判定要求，已阻止启动
 ```
 
 ## 当前限制
@@ -446,8 +475,9 @@ AS 信息: asn=12345 org=Example Org type=isp
 
 当前规则更适合完成：
 
-- 排除明显机房网络
-- 排除明显托管或云服务出口
+- 强制要求出口属于 ISP 网络
+- 排除明显机房、托管、代理、VPN、Tor 出口
+- 排除移动网络、卫星网络、爬虫网络
 - 保留后续继续增强住宅宽带判断的能力
 
 ## 后续可扩展方向
@@ -456,6 +486,8 @@ AS 信息: asn=12345 org=Example Org type=isp
 
 - `company.type`
 - `is_mobile`
+- `is_satellite`
+- `is_crawler`
 - `is_proxy`
 - `is_vpn`
 - `is_tor`
@@ -481,4 +513,5 @@ go build ./...
 
 - 如果目标程序本身不在 `PATH` 中，请传入完整路径
 - 本程序当前只做出口 IP 与网络属性校验，不检查系统是否开启代理
+- `asn.type == isp` 只能说明出口属于 ISP，不等于 100% 证明一定是传统家庭宽带
 - 如果后续需要更强的住宅宽带判定，可以继续增加更多 IP 情报源和规则
