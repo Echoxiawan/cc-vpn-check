@@ -62,33 +62,75 @@ cc-vpn-check/
 
 ## 环境要求
 
+如果你直接使用已经编译好的可执行文件，则不需要安装 Go。
+
+只有在你准备自行从源码编译时，才需要：
+
 - Go 1.22 或更高版本
 
-可先检查本机 Go 版本：
-
-```bash
-go version
-```
-
 ## 快速开始
+
+优先直接使用项目里已经编译好的可执行文件，位于 `dist/` 目录：
+
+- `dist/cc-vpn-check-mac`
+- `dist/cc-vpn-check-linux`
+- `dist/cc-vpn-check-windows.exe`
+
+### macOS
 
 在项目目录中执行：
 
 ```bash
-go run . claude
+chmod +x ./dist/cc-vpn-check-mac
+./dist/cc-vpn-check-mac claude
 ```
 
 如果你要给目标程序传参数：
 
 ```bash
-go run . claude --help
-go run . python app.py
-go run . node server.js
+./dist/cc-vpn-check-mac claude --help
+./dist/cc-vpn-check-mac python app.py
+./dist/cc-vpn-check-mac node server.js
+```
+
+### Linux
+
+在项目目录中执行：
+
+```bash
+chmod +x ./dist/cc-vpn-check-linux
+./dist/cc-vpn-check-linux claude
+```
+
+如果你要给目标程序传参数：
+
+```bash
+./dist/cc-vpn-check-linux claude --help
+./dist/cc-vpn-check-linux python app.py
+./dist/cc-vpn-check-linux node server.js
+```
+
+### Windows PowerShell
+
+在项目目录中执行：
+
+```powershell
+.\dist\cc-vpn-check-windows.exe claude
+```
+
+如果你要给目标程序传参数：
+
+```powershell
+.\dist\cc-vpn-check-windows.exe claude --help
+.\dist\cc-vpn-check-windows.exe python app.py
+.\dist\cc-vpn-check-windows.exe node server.js
 ```
 
 程序会先打印 IP 信息源、原始响应、AS 信息和网络标记，然后按“美国 ISP、非机房、非代理/VPN、非移动/卫星/爬虫”的规则决定是否放行启动目标程序。
 
-## 编译教程
+## 从源码编译
+
+如果你需要重新生成可执行文件，可以在源码目录自行编译。
 
 ### macOS
 
@@ -150,7 +192,7 @@ go build -o cc-vpn-check.exe .
 .\cc-vpn-check.exe claude
 ```
 
-## 交叉编译教程
+## 交叉编译
 
 如果你想在一个系统上编译另一个系统可执行文件，可以这样做。
 
@@ -182,7 +224,7 @@ GOOS=windows GOARCH=arm64 go build -o cc-vpn-check-windows-arm64.exe .
 推荐做法：
 
 - 新建一个专门存放个人命令行工具的目录
-- 把编译好的二进制文件放进去
+- 把已经编译好的二进制文件放进去
 - 把该目录加入 `PATH`
 
 下面分别说明。
