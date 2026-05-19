@@ -30,23 +30,32 @@ type Result struct {
 }
 
 type IPInfo struct {
-	IP           string
-	CountryCode  string
-	CountryName  string
-	Source       string
-	RawResponse  string
-	ASN          int
-	ASNOrg       string
-	ASNType      string
-	CompanyName  string
-	CompanyType  string
-	IsMobile     bool
-	IsSatellite  bool
-	IsDatacenter bool
-	IsCrawler    bool
-	IsTor        bool
-	IsProxy      bool
-	IsVPN        bool
+	IP                 string
+	CountryCode        string
+	CountryName        string
+	Continent          string
+	Source             string
+	RawResponse        string
+	RIR                string
+	ASN                int
+	ASNOrg             string
+	ASNType            string
+	ASNCountry         string
+	ASNRIR             string
+	ASNActive          bool
+	ASNAbuserScore     float64
+	CompanyName        string
+	CompanyType        string
+	CompanyAbuserScore float64
+	IsMobile           bool
+	IsSatellite        bool
+	IsDatacenter       bool
+	IsCrawler          bool
+	IsTor              bool
+	IsProxy            bool
+	IsVPN              bool
+	IsAbuser           bool
+	IsBogon            bool
 }
 
 type httpIPInspector struct {
@@ -187,23 +196,32 @@ func parseIPAPIISResponse(source string, body []byte) (IPInfo, error) {
 	company := getMap(payload, "company")
 
 	info := IPInfo{
-		IP:           strings.TrimSpace(getString(payload, "ip")),
-		CountryCode:  strings.ToUpper(strings.TrimSpace(getString(location, "country_code"))),
-		CountryName:  strings.TrimSpace(getString(location, "country")),
-		Source:       source,
-		RawResponse:  string(body),
-		ASN:          getInt(asn, "asn"),
-		ASNOrg:       strings.TrimSpace(getString(asn, "org")),
-		ASNType:      strings.ToLower(strings.TrimSpace(getString(asn, "type"))),
-		CompanyName:  strings.TrimSpace(getString(company, "name")),
-		CompanyType:  strings.ToLower(strings.TrimSpace(getString(company, "type"))),
-		IsMobile:     getBool(payload, "is_mobile"),
-		IsSatellite:  getBool(payload, "is_satellite"),
-		IsDatacenter: getBool(payload, "is_datacenter"),
-		IsCrawler:    getCrawlerFlag(payload, "is_crawler"),
-		IsTor:        getBool(payload, "is_tor"),
-		IsProxy:      getBool(payload, "is_proxy"),
-		IsVPN:        getBool(payload, "is_vpn"),
+		IP:                 strings.TrimSpace(getString(payload, "ip")),
+		CountryCode:        strings.ToUpper(strings.TrimSpace(getString(location, "country_code"))),
+		CountryName:        strings.TrimSpace(getString(location, "country")),
+		Continent:          strings.ToUpper(strings.TrimSpace(getString(location, "continent"))),
+		Source:             source,
+		RawResponse:        string(body),
+		RIR:                strings.ToUpper(strings.TrimSpace(getString(payload, "rir"))),
+		ASN:                getInt(asn, "asn"),
+		ASNOrg:             strings.TrimSpace(getString(asn, "org")),
+		ASNType:            strings.ToLower(strings.TrimSpace(getString(asn, "type"))),
+		ASNCountry:         strings.ToLower(strings.TrimSpace(getString(asn, "country"))),
+		ASNRIR:             strings.ToUpper(strings.TrimSpace(getString(asn, "rir"))),
+		ASNActive:          getBool(asn, "active"),
+		ASNAbuserScore:     parseAbuserScore(getString(asn, "abuser_score")),
+		CompanyName:        strings.TrimSpace(getString(company, "name")),
+		CompanyType:        strings.ToLower(strings.TrimSpace(getString(company, "type"))),
+		CompanyAbuserScore: parseAbuserScore(getString(company, "abuser_score")),
+		IsMobile:           getBool(payload, "is_mobile"),
+		IsSatellite:        getBool(payload, "is_satellite"),
+		IsDatacenter:       getBool(payload, "is_datacenter"),
+		IsCrawler:          getCrawlerFlag(payload, "is_crawler"),
+		IsTor:              getBool(payload, "is_tor"),
+		IsProxy:            getBool(payload, "is_proxy"),
+		IsVPN:              getBool(payload, "is_vpn"),
+		IsAbuser:           getBool(payload, "is_abuser"),
+		IsBogon:            getBool(payload, "is_bogon"),
 	}
 
 	if info.IP == "" || info.CountryCode == "" {
@@ -213,38 +231,90 @@ func parseIPAPIISResponse(source string, body []byte) (IPInfo, error) {
 	return info, nil
 }
 
+const abuserScoreThreshold = 0.15
+
 func ValidateUSResidentialLikeIP(info IPInfo) error {
+	// ---- 基础地理校验 ----
 	if info.CountryCode != "US" {
 		return fmt.Errorf(
 			"当前出口 IP 不符合要求: ip=%s country=%s(%s)，仅允许美国出口 IP 启动目标程序",
-			info.IP,
-			info.CountryCode,
-			info.CountryName,
+			info.IP, info.CountryCode, info.CountryName,
 		)
 	}
 
+	if info.Continent != "" && info.Continent != "NA" {
+		return fmt.Errorf(
+			"当前出口 IP 的大洲不是北美(NA): continent=%s，已阻止启动",
+			info.Continent,
+		)
+	}
+
+	// ---- ASN 归属校验（仅富数据源填充时生效）----
+	if info.ASNCountry != "" && info.ASNCountry != "us" {
+		return fmt.Errorf(
+			"当前出口 IP 的 ASN 注册国家不是美国: asn=%d asn_country=%s，已阻止启动",
+			info.ASN, info.ASNCountry,
+		)
+	}
+
+	// RIR 必须是 ARIN（北美地址分配机构）
+	if info.RIR != "" && info.RIR != "ARIN" {
+		return fmt.Errorf(
+			"当前出口 IP 的 RIR 不是 ARIN: rir=%s，已阻止启动",
+			info.RIR,
+		)
+	}
+
+	if info.ASNRIR != "" && info.ASNRIR != "ARIN" {
+		return fmt.Errorf(
+			"当前出口 IP 的 ASN RIR 不是 ARIN: asn=%d asn_rir=%s，已阻止启动",
+			info.ASN, info.ASNRIR,
+		)
+	}
+
+	// ASN 必须处于活跃状态（字段存在时校验）
+	if info.ASNRIR != "" && !info.ASNActive {
+		return fmt.Errorf(
+			"当前出口 IP 的 ASN 已不活跃: asn=%d org=%s，已阻止启动",
+			info.ASN, info.ASNOrg,
+		)
+	}
+
+	// ---- ASN / 公司类型校验 ----
 	if info.ASNType != "isp" {
 		return fmt.Errorf(
 			"当前出口 IP 的 ASN 类型不是 isp，已阻止启动: asn=%d org=%s asn_type=%s",
-			info.ASN,
-			info.ASNOrg,
-			emptyAsUnknown(info.ASNType),
+			info.ASN, info.ASNOrg, emptyAsUnknown(info.ASNType),
 		)
 	}
 
 	if info.CompanyType != "" && info.CompanyType != "isp" {
 		return fmt.Errorf(
 			"当前出口 IP 的公司类型不是 isp，已阻止启动: company=%s company_type=%s",
-			info.CompanyName,
-			info.CompanyType,
+			info.CompanyName, info.CompanyType,
 		)
 	}
 
+	// ---- 滥用评分校验 ----
+	if info.ASNAbuserScore > abuserScoreThreshold {
+		return fmt.Errorf(
+			"当前出口 IP 的 ASN 滥用评分过高(%.4f > %.2f): asn=%d org=%s，已阻止启动",
+			info.ASNAbuserScore, abuserScoreThreshold, info.ASN, info.ASNOrg,
+		)
+	}
+
+	if info.CompanyAbuserScore > abuserScoreThreshold {
+		return fmt.Errorf(
+			"当前出口 IP 的公司滥用评分过高(%.4f > %.2f): company=%s，已阻止启动",
+			info.CompanyAbuserScore, abuserScoreThreshold, info.CompanyName,
+		)
+	}
+
+	// ---- 网络性质校验 ----
 	if info.IsDatacenter {
 		return fmt.Errorf(
 			"当前出口 IP 被识别为数据中心或托管网络，已阻止启动: asn=%d org=%s",
-			info.ASN,
-			info.ASNOrg,
+			info.ASN, info.ASNOrg,
 		)
 	}
 
@@ -258,6 +328,14 @@ func ValidateUSResidentialLikeIP(info IPInfo) error {
 
 	if info.IsTor {
 		return errors.New("当前出口 IP 被识别为 Tor 出口节点，已阻止启动")
+	}
+
+	if info.IsAbuser {
+		return errors.New("当前出口 IP 被识别为滥用 IP，已阻止启动")
+	}
+
+	if info.IsBogon {
+		return errors.New("当前出口 IP 是保留/私有地址(bogon)，已阻止启动")
 	}
 
 	if info.IsMobile {
@@ -393,6 +471,20 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
+}
+
+// parseAbuserScore 解析 "0.0049 (Low)" 格式，返回数值部分
+func parseAbuserScore(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	parts := strings.Fields(s)
+	f, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0
+	}
+	return f
 }
 
 func emptyAsUnknown(value string) string {

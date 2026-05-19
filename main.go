@@ -17,7 +17,21 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: cc-vpn-check <程序> [参数...]")
+		return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
+	}
+
+	skipIPCheck := false
+	if args[0] == "--skip-ip-check" {
+		skipIPCheck = true
+		args = args[1:]
+		if len(args) == 0 {
+			return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
+		}
+	}
+
+	if skipIPCheck {
+		fmt.Println("已跳过 IP 校验，直接启动目标程序")
+		return checker.RunCommand(args[0], args[1:])
 	}
 
 	c := checker.NewDefaultChecker()
@@ -29,10 +43,15 @@ func run(args []string) error {
 
 	fmt.Printf("IP 信息源: %s\n", result.IP.Source)
 	fmt.Printf("IP 接口原始响应: %s\n", result.IP.RawResponse)
-	fmt.Printf("AS 信息: asn=%d org=%s type=%s\n", result.IP.ASN, result.IP.ASNOrg, result.IP.ASNType)
-	fmt.Printf("公司信息: name=%s type=%s\n", result.IP.CompanyName, result.IP.CompanyType)
+	fmt.Printf("地理信息: country=%s(%s) continent=%s\n", result.IP.CountryCode, result.IP.CountryName, result.IP.Continent)
+	fmt.Printf("RIR: ip_rir=%s asn_rir=%s\n", result.IP.RIR, result.IP.ASNRIR)
+	fmt.Printf("AS 信息: asn=%d org=%s type=%s country=%s active=%t abuser_score=%.4f\n",
+		result.IP.ASN, result.IP.ASNOrg, result.IP.ASNType,
+		result.IP.ASNCountry, result.IP.ASNActive, result.IP.ASNAbuserScore)
+	fmt.Printf("公司信息: name=%s type=%s abuser_score=%.4f\n",
+		result.IP.CompanyName, result.IP.CompanyType, result.IP.CompanyAbuserScore)
 	fmt.Printf(
-		"网络标记: mobile=%t satellite=%t crawler=%t datacenter=%t tor=%t proxy=%t vpn=%t\n",
+		"网络标记: mobile=%t satellite=%t crawler=%t datacenter=%t tor=%t proxy=%t vpn=%t abuser=%t bogon=%t\n",
 		result.IP.IsMobile,
 		result.IP.IsSatellite,
 		result.IP.IsCrawler,
@@ -40,6 +59,8 @@ func run(args []string) error {
 		result.IP.IsTor,
 		result.IP.IsProxy,
 		result.IP.IsVPN,
+		result.IP.IsAbuser,
+		result.IP.IsBogon,
 	)
 
 	if err := checker.ValidateUSResidentialLikeIP(result.IP); err != nil {
