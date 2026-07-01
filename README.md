@@ -4,6 +4,13 @@
 
 它的作用是在启动指定程序之前，先检查当前出口 IP 是否满足预设条件。只有检查通过，才会真正启动目标程序；否则直接拒绝启动。
 
+当目标程序被显式指定为 `claude`，或目标参数是一个指向 Claude Code 可执行文件的环境变量名时，程序会额外启用 Claude Code 环境隔离逻辑：
+
+- 为 Claude Code 子进程设置 `TZ=UTC`，不修改系统时区
+- 当存在 `ANTHROPIC_BASE_URL` 且目标不是本地地址时，启动只监听 `127.0.0.1` 的本地透明反向代理
+- 让 Claude Code 子进程只看到 `http://127.0.0.1:<端口>` 形式的 `ANTHROPIC_BASE_URL`
+- 把真实上游地址写入 `CLAUDE_GUARD_REAL_ANTHROPIC_BASE_URL`
+
 当前已实现的检查规则：
 
 - 出口 IP 必须位于美国，且大洲为北美（NA）
@@ -32,6 +39,7 @@ cc-vpn-check [--skip-ip-check] <程序> [参数...]
 - 启动某个命令前，必须确认出口 IP 在美国
 - 只允许更接近家庭宽带特征的 ISP 网络
 - 过滤掉机房、云主机、托管、移动、卫星、爬虫、VPN、代理等出口
+- 启动 Claude Code 前，同时降低本地时区和 `ANTHROPIC_BASE_URL` host 暴露面
 
 ## 工作原理
 
@@ -41,7 +49,9 @@ cc-vpn-check [--skip-ip-check] <程序> [参数...]
 2. 查询当前出口 IP 的地理和网络属性信息
 3. 输出 IP 情报摘要
 4. 执行预设规则校验
-5. 校验通过后，启动目标程序
+5. 校验通过后，判断目标程序是否为显式 Claude 启动
+6. 如果是 Claude，准备子进程环境隔离和本地反向代理
+7. 启动目标程序
 
 ### IP 校验规则（按顺序执行）
 
@@ -76,9 +86,12 @@ cc-vpn-check/
 ├── build.sh
 ├── README.md
 └── internal/
-    └── checker/
-        ├── checker.go
-        └── checker_test.go
+    ├── checker/
+    │   ├── checker.go
+    │   └── checker_test.go
+    └── guard/
+        ├── guard.go
+        └── guard_test.go
 ```
 
 ## 环境要求
@@ -133,6 +146,44 @@ chmod +x ./dist/cc-vpn-check-linux
 
 ```bash
 cc-vpn-check --skip-ip-check claude
+```
+
+`--skip-ip-check` 只跳过出口 IP 校验。目标仍然显式解析为 Claude 时，会继续启用 Claude Code 环境隔离逻辑。
+
+## Claude Code 环境隔离
+
+只有显式启动 Claude Code 时才会启用环境隔离。
+
+会启用的示例：
+
+```bash
+cc-vpn-check claude
+cc-vpn-check claude --help
+CLAUDE_BIN=/usr/local/bin/claude cc-vpn-check CLAUDE_BIN --version
+```
+
+不会启用的示例：
+
+```bash
+cc-vpn-check python app.py
+cc-vpn-check node script.js
+```
+
+### 环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `CLAUDE_GUARD_TZ` | 指定传给 Claude Code 子进程的时区，默认 `UTC` |
+| `CLAUDE_GUARD_DISABLE_BASE_URL_PROXY` | 设置为 `1`、`true`、`yes` 或 `on` 时，不代理 `ANTHROPIC_BASE_URL` |
+| `CLAUDE_GUARD_QUIET` | 设置后关闭 guard 自身日志 |
+| `CLAUDE_GUARD_REAL_ANTHROPIC_BASE_URL` | 代理启用时自动写入，保存真实上游地址 |
+
+示例：
+
+```bash
+ANTHROPIC_BASE_URL=https://example.com cc-vpn-check claude
+CLAUDE_GUARD_TZ=Etc/UTC cc-vpn-check claude
+CLAUDE_GUARD_DISABLE_BASE_URL_PROXY=1 cc-vpn-check claude
 ```
 
 ## 从源码编译
@@ -199,11 +250,21 @@ which claude
 
 ```bash
 claude() {
-  cc-vpn-check /usr/local/bin/claude "$@"
+  cc-vpn-check claude "$@"
 }
 ```
 
 重新加载配置后，执行 `claude` 会自动经过 IP 校验。
+
+如果 shell 函数会遮蔽真实 `claude` 命令，可以使用环境变量名显式传入真实入口：
+
+```bash
+export CLAUDE_REAL_BIN=/usr/local/bin/claude
+
+claude() {
+  cc-vpn-check CLAUDE_REAL_BIN "$@"
+}
+```
 
 ### Windows PowerShell：函数包装
 
@@ -217,7 +278,17 @@ notepad $PROFILE
 
 ```powershell
 function claude {
-    cc-vpn-check.exe "C:\Program Files\Claude\claude.exe" @args
+    cc-vpn-check.exe claude @args
+}
+```
+
+如果需要避免别名或函数遮蔽真实入口，可以使用环境变量名：
+
+```powershell
+$env:CLAUDE_REAL_BIN = "C:\Program Files\Claude\claude.exe"
+
+function claude {
+    cc-vpn-check.exe CLAUDE_REAL_BIN @args
 }
 ```
 
@@ -234,6 +305,8 @@ AS 信息: asn=7922 org=COMCAST-7922 type=isp country=us active=true abuser_scor
 公司信息: name=Comcast Cable Communications type=isp abuser_score=0.0008
 网络标记: mobile=false satellite=false crawler=false datacenter=false tor=false proxy=false vpn=false abuser=false bogon=false
 检查通过: 出口 IP=1.2.3.4，国家=US(United States)
+[claude-guard] 已隐藏 ANTHROPIC_BASE_URL host：example.com -> 127.0.0.1:54321
+[claude-guard] 已为 Claude 子进程设置 TZ=UTC
 ```
 
 校验失败示例：
@@ -251,6 +324,8 @@ AS 信息: asn=7922 org=COMCAST-7922 type=isp country=us active=true abuser_scor
 
 - 如果目标程序不在 `PATH` 中，请传入完整路径
 - 本程序只做出口 IP 与网络属性校验，不检查系统是否开启代理
+- Claude Code 环境隔离只在显式启动 Claude 时启用，不会影响 `python`、`node` 等其他目标程序
+- 本地反向代理只处理传给 Claude Code 子进程的 `ANTHROPIC_BASE_URL`，不会修改系统代理或 DNS
 - `asn.type == isp` 只能说明出口属于 ISP，不等于 100% 证明是传统家庭宽带
 - RIR / ASN country 等字段仅在使用富数据源（`ipapi.is`）时填充；回退到其他数据源时这些规则自动跳过
 

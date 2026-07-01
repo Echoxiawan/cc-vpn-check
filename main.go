@@ -6,32 +6,34 @@ import (
 	"os"
 
 	"cc-vpn-check/internal/checker"
+	"cc-vpn-check/internal/guard"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		var exitErr guard.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
-	if len(args) == 0 {
-		return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
-	}
-
 	skipIPCheck := false
-	if args[0] == "--skip-ip-check" {
+	if len(args) > 0 && args[0] == "--skip-ip-check" {
 		skipIPCheck = true
 		args = args[1:]
-		if len(args) == 0 {
-			return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
-		}
+	}
+
+	if len(args) == 0 || args[0] == "" {
+		return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
 	}
 
 	if skipIPCheck {
 		fmt.Println("已跳过 IP 校验，直接启动目标程序")
-		return checker.RunCommand(args[0], args[1:])
+		return runTarget(args)
 	}
 
 	c := checker.NewDefaultChecker()
@@ -68,5 +70,22 @@ func run(args []string) error {
 	}
 
 	fmt.Printf("检查通过: 出口 IP=%s，国家=%s(%s)\n", result.IP.IP, result.IP.CountryCode, result.IP.CountryName)
+	return runTarget(args)
+}
+
+func runTarget(args []string) error {
+	if len(args) == 0 || args[0] == "" {
+		return errors.New("用法: cc-vpn-check [--skip-ip-check] <程序> [参数...]")
+	}
+
+	if guard.IsClaudeCommand(args[0]) {
+		prepared, err := guard.PrepareClaudeCommand(args[0], args[1:])
+		if err != nil {
+			return err
+		}
+		defer prepared.Close()
+		return guard.ExecCommand(prepared.Path, prepared.Args, prepared.Env)
+	}
+
 	return checker.RunCommand(args[0], args[1:])
 }
